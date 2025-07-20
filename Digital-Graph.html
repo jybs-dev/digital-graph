@@ -1,0 +1,317 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Advanced Graph Plotter</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    canvas { border: 1px solid black; cursor: crosshair; }
+    #controls, #tableSection { margin-top: 10px; }
+    .group { margin: 10px 0; }
+    label { margin-right: 10px; }
+    input[type="number"], input[type="text"], select { width: 80px; }
+    table { border-collapse: collapse; margin-top: 10px; table-layout: fixed; }
+    th, td { border: 1px solid #999; padding: 5px; text-align: center; min-width: 100px; }
+    th { background: #eee; }
+    .active-btn { background-color: lightgreen; }
+  </style>
+</head>
+<body>
+  <h2>📊 Advanced Graph Plotter</h2>
+
+  <canvas id="graph" width="800" height="600"></canvas>
+
+  <div id="controls">
+    <div class="group">
+      <label>Grid size:
+        <select id="gridSize">
+          <option value="24">1/4 inch</option>
+          <option value="36">3/8 inch</option>
+          <option value="48" selected>1/2 inch</option>
+        </select>
+      </label>
+      <label><input type="checkbox" id="snapToggle" checked> Snap to Grid</label>
+      <label><input type="checkbox" id="connectLines" onchange="drawGrid()"> Connect Points</label>
+    </div>
+
+    <div class="group">
+      <label>X scale/unit: <input type="number" id="xLabelScale" value="1" step="0.1"></label>
+      <label>Y scale/unit: <input type="number" id="yLabelScale" value="1" step="0.1"></label>
+      <label>X axis title: <input type="text" id="xAxisTitle" value="Time (s)"></label>
+      <label>Y axis title: <input type="text" id="yAxisTitle" value="Distance (m)"></label>
+    </div>
+
+    <div class="group">
+      <button id="toggleAddPointBtn" onclick="toggleAddPointMode()">🎯 Click to Add Point</button>
+      <button onclick="undoPoint()">Undo Last Point</button>
+      <button onclick="clearPoints()">Clear All</button>
+      <button onclick="downloadCanvas()">Download Image</button>
+      <button onclick="exportCSV()">Export CSV</button>
+      <input type="file" id="importFile" accept=".csv" />
+    </div>
+  </div>
+
+  <div id="tableSection">
+    <h3>📋 Point Input Table (Horizontal)</h3>
+    <table id="pointTable">
+      <thead><tr id="pointTableHeader"><th>Axis</th></tr></thead>
+      <tbody><tr id="pointTableRow"><td><b>X</b><br><b>Y</b></td></tr></tbody>
+    </table>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("graph");
+    const ctx = canvas.getContext("2d");
+    const origin = { x: canvas.width / 2, y: canvas.height / 2 };
+    let points = [];
+    let addPointMode = false;
+    let draggingTitle = null;
+    let offset = { x: 0, y: 0 };
+
+    let xAxisTitlePos = { x: canvas.width - 60 + 6, y: origin.y - 6 };
+    let yAxisTitlePos = { x: canvas.width / 2, y: 4 };
+
+    const toggleAddPointBtn = document.getElementById("toggleAddPointBtn");
+
+    function toggleAddPointMode() {
+      addPointMode = !addPointMode;
+      toggleAddPointBtn.classList.toggle("active-btn", addPointMode);
+    }
+
+    function getScale() {
+      return {
+        xScale: parseFloat(document.getElementById("xLabelScale").value) || 1,
+        yScale: parseFloat(document.getElementById("yLabelScale").value) || 1
+      };
+    }
+
+    function drawGrid() {
+      const grid = parseInt(document.getElementById("gridSize").value);
+      const { xScale, yScale } = getScale();
+      const rightMargin = 60;
+      const topMargin = 24;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.beginPath();
+      ctx.strokeStyle = "#ddd";
+      for (let x = origin.x; x <= canvas.width; x += grid) {
+        ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height);
+      }
+      for (let x = origin.x - grid; x >= 0; x -= grid) {
+        ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height);
+      }
+      for (let y = origin.y; y <= canvas.height; y += grid) {
+        ctx.moveTo(0, y); ctx.lineTo(canvas.width, y);
+      }
+      for (let y = origin.y - grid; y >= 0; y -= grid) {
+        ctx.moveTo(0, y); ctx.lineTo(canvas.width, y);
+      }
+      ctx.stroke();
+
+      // Draw axes
+      ctx.beginPath();
+      ctx.strokeStyle = "black";
+      ctx.lineWidth = 1.5;
+      ctx.moveTo(0, origin.y);
+      ctx.lineTo(canvas.width - rightMargin, origin.y);
+      ctx.moveTo(origin.x, topMargin);
+      ctx.lineTo(origin.x, canvas.height);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+
+      // Draw axis titles
+      ctx.fillStyle = "black";
+      ctx.font = "14px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.fillText(document.getElementById("yAxisTitle").value, yAxisTitlePos.x, yAxisTitlePos.y);
+
+      ctx.textAlign = "left";
+      ctx.textBaseline = "bottom";
+      ctx.fillText(document.getElementById("xAxisTitle").value, xAxisTitlePos.x, xAxisTitlePos.y);
+
+      // Ticks
+      ctx.font = "12px Arial";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      for (let x = origin.x; x <= canvas.width; x += grid) {
+        if (x !== origin.x) ctx.fillText(((x - origin.x) / grid * xScale).toFixed(1), x, origin.y + 4);
+      }
+      for (let x = origin.x - grid; x >= 0; x -= grid) {
+        ctx.fillText(((x - origin.x) / grid * xScale).toFixed(1), x, origin.y + 4);
+      }
+
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      for (let y = origin.y - grid; y >= 0; y -= grid) {
+        ctx.fillText(((origin.y - y) / grid * yScale).toFixed(1), origin.x - 4, y);
+      }
+      for (let y = origin.y + grid; y <= canvas.height; y += grid) {
+        ctx.fillText((-(y - origin.y) / grid * yScale).toFixed(1), origin.x - 4, y);
+      }
+
+      drawPoints();
+    }
+
+    function drawPoints() {
+      const connect = document.getElementById("connectLines").checked;
+      const grid = parseInt(document.getElementById("gridSize").value);
+      const { xScale, yScale } = getScale();
+
+      if (connect && points.length > 1) {
+        ctx.beginPath();
+        ctx.strokeStyle = "blue";
+        points.forEach((pt, i) => {
+          const x = origin.x + pt.x * grid;
+          const y = origin.y - pt.y * grid;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      }
+
+      points.forEach(pt => {
+        const x = origin.x + pt.x * grid;
+        const y = origin.y - pt.y * grid;
+        ctx.beginPath();
+        ctx.fillStyle = "red";
+        ctx.arc(x, y, 5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+
+    canvas.addEventListener("click", (e) => {
+      if (!addPointMode || draggingTitle !== null) return;
+      const rect = canvas.getBoundingClientRect();
+      const grid = parseInt(document.getElementById("gridSize").value);
+      const snap = document.getElementById("snapToggle").checked;
+      let x = (e.clientX - rect.left - origin.x) / grid;
+      let y = -(e.clientY - rect.top - origin.y) / grid;
+      if (snap) {
+        x = Math.round(x);
+        y = Math.round(y);
+      }
+      points.push({ x, y });
+      updateTableFromPoints();
+      drawGrid();
+    });
+
+    canvas.addEventListener("mousedown", (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      ctx.font = "14px sans-serif";
+      const xLabel = document.getElementById("xAxisTitle").value;
+      const yLabel = document.getElementById("yAxisTitle").value;
+      const xWidth = ctx.measureText(xLabel).width;
+      const yWidth = ctx.measureText(yLabel).width;
+
+      if (mouseX >= xAxisTitlePos.x &&
+          mouseX <= xAxisTitlePos.x + xWidth &&
+          mouseY >= xAxisTitlePos.y - 14 &&
+          mouseY <= xAxisTitlePos.y + 4) {
+        draggingTitle = "x";
+        offset.x = mouseX - xAxisTitlePos.x;
+        offset.y = mouseY - xAxisTitlePos.y;
+      } else if (mouseX >= yAxisTitlePos.x - yWidth / 2 &&
+                 mouseX <= yAxisTitlePos.x + yWidth / 2 &&
+                 mouseY >= yAxisTitlePos.y &&
+                 mouseY <= yAxisTitlePos.y + 14) {
+        draggingTitle = "y";
+        offset.x = mouseX - yAxisTitlePos.x;
+        offset.y = mouseY - yAxisTitlePos.y;
+      }
+    });
+
+    canvas.addEventListener("mousemove", (e) => {
+      if (!draggingTitle) return;
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      if (draggingTitle === "x") {
+        xAxisTitlePos.x = mouseX - offset.x;
+        xAxisTitlePos.y = mouseY - offset.y;
+      } else if (draggingTitle === "y") {
+        yAxisTitlePos.x = mouseX - offset.x;
+        yAxisTitlePos.y = mouseY - offset.y;
+      }
+      drawGrid();
+    });
+
+    canvas.addEventListener("mouseup", () => draggingTitle = null);
+    canvas.addEventListener("mouseleave", () => draggingTitle = null);
+
+    function undoPoint() {
+      points.pop();
+      updateTableFromPoints();
+      drawGrid();
+    }
+
+    function clearPoints() {
+      points = [];
+      updateTableFromPoints();
+      drawGrid();
+    }
+
+    function downloadCanvas() {
+      const link = document.createElement("a");
+      link.download = "graph.png";
+      link.href = canvas.toDataURL();
+      link.click();
+    }
+
+    function exportCSV() {
+      const rows = ["x,y"];
+      points.forEach(p => rows.push(`${p.x},${p.y}`));
+      const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "points.csv";
+      link.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function updateTableFromPoints() {
+      const header = document.getElementById("pointTableHeader");
+      const row = document.getElementById("pointTableRow");
+      header.innerHTML = "<th>Axis</th>";
+      row.innerHTML = "<td><b>X</b><br><b>Y</b></td>";
+
+      points.forEach((pt, i) => {
+        const th = document.createElement("th");
+        th.textContent = `P${i + 1}`;
+        header.appendChild(th);
+
+        const td = document.createElement("td");
+        const xInput = document.createElement("input");
+        const yInput = document.createElement("input");
+        xInput.type = yInput.type = "number";
+        xInput.value = pt.x;
+        yInput.value = pt.y;
+
+        xInput.onchange = () => { pt.x = parseFloat(xInput.value); drawGrid(); };
+        yInput.onchange = () => { pt.y = parseFloat(yInput.value); drawGrid(); };
+
+        const btn = document.createElement("button");
+        btn.textContent = "Delete";
+        btn.onclick = () => {
+          points.splice(i, 1);
+          updateTableFromPoints();
+          drawGrid();
+        };
+
+        td.appendChild(xInput);
+        td.appendChild(document.createElement("br"));
+        td.appendChild(yInput);
+        td.appendChild(document.createElement("br"));
+        td.appendChild(btn);
+        row.appendChild(td);
+      });
+    }
+
+    drawGrid();
+  </script>
+</body>
+</html>
